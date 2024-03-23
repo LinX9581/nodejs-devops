@@ -1,0 +1,37 @@
+stages:
+  - build_image
+
+publish_image:      
+  image: google/cloud-sdk:alpine
+  stage: build_image  
+  only:
+    - master
+  services:
+    - name: docker:dind
+  before_script:
+    - gcloud auth activate-service-account --key-file /gitlab-runner/gcloud-auth/nownews-analytics.json
+    - gcloud auth configure-docker --quiet
+    - gcloud config set project nownews-analytics
+  script:
+    - docker build -t nodejs-template:3.3 . --no-cache
+    - docker tag nodejs-template:3.3 asia.gcr.io/nownews-analytics/nodejs-template:3.3
+    - docker push asia.gcr.io/nownews-analytics/nodejs-template:3.3
+  tags:
+    - nownews-docker-runner
+
+
+build_job:
+  image: node:14.18.0
+  stage: build
+
+  script:
+    - node -v
+    - ls /gitlab-runner/config
+    - ls ~/.ssh
+    - pwd
+    - cp /gitlab-runner/config/config.js ./
+    - yarn install
+    - npm run test
+    - npm start
+  tags:
+    - nownews-docker-runner
