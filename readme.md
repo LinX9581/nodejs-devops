@@ -1,15 +1,19 @@
 
 # GCP_Asset_Audit
 
-## update firewall,iam,vm to google sheet
-* Set key
+## update firewall,iam,vm list to google sheet
+* Set VM Permission  
+gcloud auth activate-service-account --key-file service_account_json  
+service_account_json need to have Viewer permission  
+  
+* Set key  
 mv config-sample.js config.js  
 Set GCP IAM key, SheetID, and ProjectID into the config.js  
-
-* Create google sheet
+  
+* Create google sheet  
 create google sheet and share permission to service account email
-
-* Set SheetID Into Function
+  
+* Set SheetID Into Function  
 ./schedule/schedule.js  
 ```
 // updateGcpToSheet();
@@ -23,7 +27,8 @@ async function updateGcpToSheet() {
   }
 }
 ```
-
-* Run
+  
+* Run  
 yarn install  
 yarn start  
+  
