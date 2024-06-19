@@ -3,17 +3,17 @@ import { exec, spawn } from "child_process";
 import util from "util";
 const execAsync = util.promisify(exec);
 
-// updateVmlistToSheet();
-export async function updateVmlistToSheet(sheetId) {
+// updateVmlistToSheet(config.sheetId.gcp_all_vm_details, config.stg_project);
+export async function updateVmlistToSheet(sheetId, projectList) {
   try {
-    for (const projectName of Object.keys(config.stg_project)) {
+    for (const projectName of Object.keys(projectList)) {
       console.log("Project -> " + projectName);
 
       // Clear the Google Sheet for each project, and set the project
-      const projectId = config.stg_project[projectName];
-      await execAsync(`gcloud config set project ${config.stg_project[projectName]}`);
+      const projectId = projectList[projectName];
+      await execAsync(`gcloud config set project ${projectList[projectName]}`);
       await googleApis.createGsSheet(sheetId, projectName);
-      await sleep(2000);
+      await sleep(1000);
       await googleApis.clearGsSheet(sheetId, projectName + "!A1:Z");
 
       let vmList = await execAsync(

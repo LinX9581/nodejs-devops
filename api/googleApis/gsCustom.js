@@ -54,7 +54,7 @@ async function createGsSheet(sheetId, workName) {
         {
           addSheet: {
             properties: {
-              sheetId: Math.floor(Math.random() * 5),
+              sheetId: parseInt(Date.now().toString().slice(-9)),
               title: workName,
             },
           },

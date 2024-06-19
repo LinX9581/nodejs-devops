@@ -26,7 +26,7 @@ async function restartTomcat(hostName) {
 
   try {
     // await execProm(`ssh ansible@${hostIp} 'for pid in $(ps aux | grep [a]pache-tomcat | awk "{print $2}"); do kill -9 $pid; done'`);
-    const result = await execProm(`ssh -o StrictHostKeyChecking=no  ansible@${hostIp} "sudo /opt/tomcat-shutdown.sh && sudo /opt/tomcat-startup.sh"`);
+    const result = await execProm(`ssh -o StrictHostKeyChecking=no  ansible@${hostIp} "sudo /opt/tomcat-shutdown.sh  && sleep 10 && sudo /opt/tomcat-startup.sh"`);
     return result;
   } catch (error) {
     console.log(error);
