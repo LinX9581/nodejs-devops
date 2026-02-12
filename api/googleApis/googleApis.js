@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import config from "../../config.js";
 
 let { client_email, private_key } = config.google;
 const scopes = ["https://www.googleapis.com/auth/spreadsheets"];

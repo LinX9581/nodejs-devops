@@ -1,18 +1,18 @@
-import * as googleApis from "../../api/googleApis/gsCustom";
-import { exec, spawn } from "child_process";
+import * as googleApis from "../../api/googleApis/gsCustom.js";
+import { exec } from "child_process";
 import util from "util";
+import config from "../../config.js"; 
 const execAsync = util.promisify(exec);
 
-// updateFirewallRulesToSheet();
-export async function updateFirewallRulesToSheet(sheetId) {
+// updateFirewallRulesToSheet(config.sheetId.gcp_firewall, config.stg_project);
+export async function updateFirewallRulesToSheet(sheetId, projectList) {
   try {
-    // Iterate over the values of the config.stg_project object
-    for (const projectName of Object.keys(config.stg_project)) {
+    for (const projectName of Object.keys(projectList)) {
       console.log("寫入的專案: " + projectName);
 
       // Clear the Google Sheet for each project, and set the project
-      const projectId = config.stg_project[projectName];
-      await execAsync(`gcloud config set project ${config.stg_project[projectName]}`);
+      const projectId = projectList[projectName];
+      await execAsync(`gcloud config set project ${projectId}`);
       await googleApis.createGsSheet(sheetId, projectName);
       await sleep(2000);
       await googleApis.clearGsSheet(sheetId, projectName + "!A1:Z");
@@ -36,7 +36,11 @@ export async function updateFirewallRulesToSheet(sheetId) {
           `gcloud compute firewall-rules describe ${firewallRuleName} --format="value(sourceRanges.list(),destinationRanges.list())"`
         );
         const firewallDetailsArray = firewallDetails.trim().split(",");
-        ruleDetails.push(...firewallDetailsArray);
+
+        // Combine IP ranges into a single string separated by commas
+        const ipRanges = firewallDetailsArray.join(", ");
+        ruleDetails.push(ipRanges);
+
         await googleApis.updateGsSheet(sheetId, projectName + "!A" + (i + 1), [ruleDetails]);
       }
     }

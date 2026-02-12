@@ -1,4 +1,4 @@
-import { getGsAuth } from "./googleApis";
+import { getGsAuth } from "./googleApis.js";
 
 async function updateGsSheet(sheetId, range, values) {
   const gsapi = await getGsAuth();

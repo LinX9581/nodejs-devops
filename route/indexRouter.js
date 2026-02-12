@@ -1,7 +1,8 @@
 import express from "express";
 import moment from "moment";
-import { exec, spawn } from "child_process";
+import { exec } from "child_process";
 import util from "util";
+import config from "../config.js";
 const execProm = util.promisify(exec);
 
 let router = express.Router();
@@ -16,6 +17,7 @@ router.get("/", async function (req, res) {
 
 const hostsMapping = config.hostsMapping;
 
+// restartTomcat("stg-fn-tcn-01")
 async function restartTomcat(hostName) {
   const hostIp = hostsMapping[hostName];
   console.log(hostIp);
@@ -26,7 +28,8 @@ async function restartTomcat(hostName) {
 
   try {
     // await execProm(`ssh ansible@${hostIp} 'for pid in $(ps aux | grep [a]pache-tomcat | awk "{print $2}"); do kill -9 $pid; done'`);
-    const result = await execProm(`ssh -o StrictHostKeyChecking=no  ansible@${hostIp} "sudo /opt/tomcat-shutdown.sh  && sleep 10 && sudo /opt/tomcat-startup.sh"`);
+    const result = await execProm(`ssh -o StrictHostKeyChecking=no  ansible@${hostIp} "sudo /opt/shutdown.sh  && sleep 10 && sudo /opt/startup.sh"`);
+    console.log(result);
     return result;
   } catch (error) {
     console.log(error);
@@ -50,4 +53,4 @@ router.post("/restartTomcat", async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

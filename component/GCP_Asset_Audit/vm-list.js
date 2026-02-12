@@ -1,6 +1,7 @@
-import * as googleApis from "../../api/googleApis/gsCustom";
-import { exec, spawn } from "child_process";
+import * as googleApis from "../../api/googleApis/gsCustom.js";
+import { exec } from "child_process";
 import util from "util";
+import config from "../../config.js"; 
 const execAsync = util.promisify(exec);
 
 // updateVmlistToSheet(config.sheetId.gcp_all_vm_details, config.stg_project);
