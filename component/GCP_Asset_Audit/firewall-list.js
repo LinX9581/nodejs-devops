@@ -1,55 +1,114 @@
 import * as googleApis from "../../api/googleApis/gsCustom.js";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import util from "util";
-import config from "../../config.js"; 
-const execAsync = util.promisify(exec);
+import config from "../../config.js";
 
-// updateFirewallRulesToSheet(config.sheetId.gcp_firewall, config.stg_project);
-export async function updateFirewallRulesToSheet(sheetId, projectList) {
+const execFileAsync = util.promisify(execFile);
+const HEADERS = ["NAME", "NETWORK", "DIRECTION", "PRIORITY", "ALLOW", "DISABLED", "TARGET_TAGS", "DENY", "用途", "IP範圍"];
+
+export async function updateFirewallRulesToSheet(sheetId, projectList = config.stg_project) {
   try {
     for (const projectName of Object.keys(projectList)) {
       console.log("寫入的專案: " + projectName);
 
-      // Clear the Google Sheet for each project, and set the project
       const projectId = projectList[projectName];
-      await execAsync(`gcloud config set project ${projectId}`);
       await googleApis.createGsSheet(sheetId, projectName);
-      await sleep(2000);
-      await googleApis.clearGsSheet(sheetId, projectName + "!A1:Z");
+      await googleApis.clearGsSheet(sheetId, `${projectName}!A1:Z`);
 
-      // Get the list of firewall rules for the project
-      const { stdout: firewallRulesList } = await execAsync(
-        `gcloud compute firewall-rules list --format="table(name,network,DIRECTION,PRIORITY,ALLOW,DISABLED,targetTags.list():label=TARGET_TAGS,DENY)"`
-      );
-      const firewallRulesLines = firewallRulesList.split(/\n/);
-      const headers = firewallRulesLines[0].replace(/, /g, ":").replace(/,t/g, "-t").replace(/\s+/g, ",").split(",");
-      headers.push("用途", "IP範圍");
-      await googleApis.updateGsSheet(sheetId, projectName + "!A" + 1, [headers]);
+      const firewallRules = await getFirewallRules(projectId);
+      const rows = buildFirewallRows(firewallRules);
+      await googleApis.updateGsSheet(sheetId, `${projectName}!A1`, rows);
 
-      // Process each firewall rule
-      for (let i = 1; i < firewallRulesLines.length - 1; i++) {
-        await sleep(300);
-        let ruleDetails = firewallRulesLines[i].replace(/, /g, ":").replace(/,t/g, "-t").replace(/\s+/g, ",").split(",");
-
-        const firewallRuleName = ruleDetails[0];
-        const { stdout: firewallDetails } = await execAsync(
-          `gcloud compute firewall-rules describe ${firewallRuleName} --format="value(sourceRanges.list(),destinationRanges.list())"`
-        );
-        const firewallDetailsArray = firewallDetails.trim().split(",");
-
-        // Combine IP ranges into a single string separated by commas
-        const ipRanges = firewallDetailsArray.join(", ");
-        ruleDetails.push(ipRanges);
-
-        await googleApis.updateGsSheet(sheetId, projectName + "!A" + (i + 1), [ruleDetails]);
-      }
+      console.log(`Updated ${projectName}: ${rows.length - 1} firewall rules`);
     }
     console.log("Firewall update complete.");
   } catch (error) {
     console.error(error);
+    throw error;
   }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function getFirewallRules(projectId) {
+  const { stdout } = await execFileAsync(
+    "gcloud",
+    [
+      "compute",
+      "firewall-rules",
+      "list",
+      "--project",
+      projectId,
+      "--format=json(name,network.basename(),direction,priority,allowed,denied,disabled,targetTags,sourceRanges,destinationRanges)",
+    ],
+    { maxBuffer: 1024 * 1024 * 20 }
+  );
+
+  return JSON.parse(stdout || "[]");
+}
+
+function buildFirewallRows(firewallRules) {
+  const rows = [HEADERS];
+
+  firewallRules.sort(compareFirewallRules).forEach((rule) => {
+    rows.push([
+      rule.name || "",
+      rule.network || "",
+      rule.direction || "",
+      rule.priority ?? "",
+      formatFirewallEntries(rule.allowed),
+      rule.disabled ?? "",
+      formatList(rule.targetTags),
+      formatFirewallEntries(rule.denied),
+      "",
+      formatIpRanges(rule),
+    ]);
+  });
+
+  return rows;
+}
+
+function compareFirewallRules(a, b) {
+  const disabledCompare = Number(Boolean(a.disabled)) - Number(Boolean(b.disabled));
+  if (disabledCompare !== 0) return disabledCompare;
+
+  const directionCompare = String(a.direction || "").localeCompare(String(b.direction || ""));
+  if (directionCompare !== 0) return directionCompare;
+
+  const priorityCompare = Number(a.priority || 0) - Number(b.priority || 0);
+  if (priorityCompare !== 0) return priorityCompare;
+
+  return String(a.name || "").localeCompare(String(b.name || ""));
+}
+
+function formatFirewallEntries(entries = []) {
+  return entries
+    .map((entry) => {
+      const protocol = entry.IPProtocol || "";
+      const ports = entry.ports?.length ? `:${entry.ports.join(",")}` : "";
+      return `${protocol}${ports}`;
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function formatList(values = []) {
+  return values.filter(Boolean).join(", ");
+}
+
+function formatIpRanges(rule) {
+  return [...(rule.sourceRanges || []), ...(rule.destinationRanges || [])].filter(Boolean).join(", ");
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const projectListName = process.argv[2] || "stg_project";
+  const projectList = config[projectListName];
+
+  if (!projectList) {
+    console.error(`Project list not found: config.${projectListName}`);
+    process.exit(1);
+  }
+
+  updateFirewallRulesToSheet(config.sheetId.gcp_firewall, projectList).catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

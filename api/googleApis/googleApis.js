@@ -1,10 +1,14 @@
 import { google } from "googleapis";
 import config from "../../config.js";
 
-let { client_email, private_key } = config.google;
+const { client_email, private_key } = config.google;
 const scopes = ["https://www.googleapis.com/auth/spreadsheets"];
 
-const jwt = new google.auth.JWT(client_email, null, private_key, scopes);
+const jwt = new google.auth.JWT({
+  email: client_email,
+  key: private_key,
+  scopes,
+});
 jwt.authorize(function (err) {
   if (err) {
     console.log("Google Api Err" + err);

@@ -62,13 +62,8 @@ async function createGsSheet(sheetId, workName) {
       ],
     },
   };
-  gsapi.spreadsheets.batchUpdate(createOpt, (err) => {
-    if (err) {
-      console.log(err);
-    } else {
-      console.log(`Sheet "${workName}" created successfully.`);
-    }
-  });
+  await gsapi.spreadsheets.batchUpdate(createOpt);
+  console.log(`Sheet "${workName}" created successfully.`);
 }
 
 async function clearGsSheet(sheetId, range) {

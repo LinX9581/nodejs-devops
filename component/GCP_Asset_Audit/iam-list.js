@@ -1,51 +1,90 @@
 import * as googleApis from "../../api/googleApis/gsCustom.js";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import util from "util";
 import config from "../../config.js";
-const execAsync = util.promisify(exec);
 
-// updateIamPolicies(config.sheetId.gcp_iam, config.stg_project);
-export async function updateIamPolicies(sheetId,projectList) {
+const execFileAsync = util.promisify(execFile);
+const ACCOUNT_TYPE_ORDER = {
+  "Service Account": 0,
+  "User Account": 1,
+};
+
+export async function updateIamPolicies(sheetId, projectList = config.stg_project) {
   try {
     for (const projectName of Object.keys(projectList)) {
       console.log("Project -> " + projectName);
 
-      // Clear the Google Sheet for each project, and set the project
       const projectId = projectList[projectName];
-      await execAsync(`gcloud config set project ${projectList[projectName]}`);
       await googleApis.createGsSheet(sheetId, projectName);
-      await sleep(2000);
-      await googleApis.clearGsSheet(sheetId, projectName + "!A1:Z");
+      await googleApis.clearGsSheet(sheetId, `${projectName}!A1:Z`);
 
-      // Get project IAM Policy and update Google Sheet
-      const { stdout: iamPolicy } = await execAsync(`gcloud projects get-iam-policy ${projectId} --format=json`);
-      await processIamPolicy(JSON.parse(iamPolicy).bindings, projectName, sheetId);
+      const bindings = await getIamBindings(projectId);
+      const rows = buildIamRows(bindings);
+      await googleApis.updateGsSheet(sheetId, `${projectName}!A1`, rows);
+
+      console.log(`Updated ${projectName}: ${rows.length - 1} members`);
     }
     console.log("IAM policy update complete.");
   } catch (error) {
     console.error(error);
+    throw error;
   }
 }
 
-async function processIamPolicy(iamList, projectName, sheetId) {
-  const headers = [["Role", "Member", "Account Type"]];
-  let data = [];
-  iamList.forEach(({ role, members }) => {
-    members
-      // 排除系統帳號 & GCE服務帳號
-      .filter(
-        (member) =>
-          (!member.startsWith("serviceAccount:service-") && !/^serviceAccount:\d+.*$/.test(member)) ||
-          member.includes("-compute@developer.gserviceaccount.com")
-      )
-      // 只取用戶帳號
-      .forEach((member) => data.push([role, member, member.startsWith("serviceAccount:") ? "Service Account" : "User Account"]));
+async function getIamBindings(projectId) {
+  const { stdout } = await execFileAsync("gcloud", ["projects", "get-iam-policy", projectId, "--format=json"], {
+    maxBuffer: 1024 * 1024 * 20,
   });
-  if (data.length > 0) {
-    await googleApis.updateGsSheet(sheetId, `${projectName}!A1`, headers.concat(data));
-  }
+  return JSON.parse(stdout).bindings || [];
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function buildIamRows(iamList) {
+  const headers = [["Role", "Member", "Account Type"]];
+  const data = [];
+
+  for (const { role, members = [] } of iamList) {
+    for (const member of members) {
+      if (shouldSkipMember(member)) continue;
+      data.push([role, member, getAccountType(member)]);
+    }
+  }
+
+  data.sort(compareIamRows);
+  return headers.concat(data);
+}
+
+function shouldSkipMember(member) {
+  const isGoogleManagedServiceAccount = member.startsWith("serviceAccount:service-") || /^serviceAccount:\d+.*$/.test(member);
+  const isComputeDefaultServiceAccount = member.includes("-compute@developer.gserviceaccount.com");
+
+  return isGoogleManagedServiceAccount && !isComputeDefaultServiceAccount;
+}
+
+function getAccountType(member) {
+  return member.startsWith("serviceAccount:") ? "Service Account" : "User Account";
+}
+
+function compareIamRows(a, b) {
+  const accountTypeCompare = ACCOUNT_TYPE_ORDER[a[2]] - ACCOUNT_TYPE_ORDER[b[2]];
+  if (accountTypeCompare !== 0) return accountTypeCompare;
+
+  const memberCompare = a[1].localeCompare(b[1]);
+  if (memberCompare !== 0) return memberCompare;
+
+  return a[0].localeCompare(b[0]);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const projectListName = process.argv[2] || "stg_project";
+  const projectList = config[projectListName];
+
+  if (!projectList) {
+    console.error(`Project list not found: config.${projectListName}`);
+    process.exit(1);
+  }
+
+  updateIamPolicies(config.sheetId.gcp_iam, projectList).catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

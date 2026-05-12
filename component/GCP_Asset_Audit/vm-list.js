@@ -1,46 +1,98 @@
 import * as googleApis from "../../api/googleApis/gsCustom.js";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import util from "util";
-import config from "../../config.js"; 
-const execAsync = util.promisify(exec);
+import config from "../../config.js";
 
-// updateVmlistToSheet(config.sheetId.gcp_all_vm_details, config.stg_project);
-export async function updateVmlistToSheet(sheetId, projectList) {
+const execFileAsync = util.promisify(execFile);
+const HEADERS = ["NAME", "STATUS", "ZONE", "MACHINE_TYPE", "INTERNAL_IP", "EXTERNAL_IP"];
+
+export async function updateVmlistToSheet(sheetId, projectList = config.stg_project) {
   try {
     for (const projectName of Object.keys(projectList)) {
       console.log("Project -> " + projectName);
 
-      // Clear the Google Sheet for each project, and set the project
       const projectId = projectList[projectName];
-      await execAsync(`gcloud config set project ${projectList[projectName]}`);
       await googleApis.createGsSheet(sheetId, projectName);
-      await sleep(1000);
-      await googleApis.clearGsSheet(sheetId, projectName + "!A1:Z");
+      await googleApis.clearGsSheet(sheetId, `${projectName}!A1:Z`);
 
-      let vmList = await execAsync(
-        `gcloud compute instances list --format="table(name,status,zone,MACHINE_TYPE,INTERNAL_IP,EXTERNAL_IP)" --sort-by status`
-      );
-      let vmListArray = vmList.stdout.split(/\n/);
-      let eachVm = [];
-      for (let i = 0; i < vmListArray.length; i++) {
-        await sleep(1000);
-        eachVm = vmListArray[i]
-          .replace(/m /g, "m:")
-          .replace(/ v/g, ":")
-          .replace(/, /g, ":")
-          .replace(/=,/g, "=")
-          .replace(/ G/g, ":G")
-          .replace(/\s+/g, ",")
-          .split(",");
-        await googleApis.updateGsSheet(sheetId, projectName + "!A" + (i + 1), [eachVm]);
-      }
+      const instances = await getVmInstances(projectId);
+      const rows = buildVmRows(instances);
+      await googleApis.updateGsSheet(sheetId, `${projectName}!A1`, rows);
+
+      console.log(`Updated ${projectName}: ${rows.length - 1} VMs`);
     }
     console.log("VM update complete.");
   } catch (error) {
-    console.log(error);
+    console.error(error);
+    throw error;
   }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function getVmInstances(projectId) {
+  const { stdout } = await execFileAsync(
+    "gcloud",
+    [
+      "compute",
+      "instances",
+      "list",
+      "--project",
+      projectId,
+      "--format=json(name,status,zone.basename(),machineType.basename(),networkInterfaces[].networkIP,networkInterfaces[].accessConfigs[].natIP)",
+    ],
+    { maxBuffer: 1024 * 1024 * 20 }
+  );
+
+  return JSON.parse(stdout || "[]");
+}
+
+function buildVmRows(instances) {
+  const rows = [HEADERS];
+
+  instances.sort(compareInstances).forEach((instance) => {
+    const networkInterfaces = instance.networkInterfaces || [];
+    rows.push([
+      instance.name || "",
+      instance.status || "",
+      instance.zone || "",
+      instance.machineType || "",
+      getInternalIps(networkInterfaces),
+      getExternalIps(networkInterfaces),
+    ]);
+  });
+
+  return rows;
+}
+
+function compareInstances(a, b) {
+  const statusCompare = String(a.status || "").localeCompare(String(b.status || ""));
+  if (statusCompare !== 0) return statusCompare;
+
+  return String(a.name || "").localeCompare(String(b.name || ""));
+}
+
+function getInternalIps(networkInterfaces) {
+  return networkInterfaces.map((item) => item.networkIP).filter(Boolean).join(", ");
+}
+
+function getExternalIps(networkInterfaces) {
+  return networkInterfaces
+    .flatMap((item) => item.accessConfigs || [])
+    .map((item) => item.natIP)
+    .filter(Boolean)
+    .join(", ");
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const projectListName = process.argv[2] || "stg_project";
+  const projectList = config[projectListName];
+
+  if (!projectList) {
+    console.error(`Project list not found: config.${projectListName}`);
+    process.exit(1);
+  }
+
+  updateVmlistToSheet(config.sheetId.gcp_all_vm_details, projectList).catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

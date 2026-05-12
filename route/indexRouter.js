@@ -7,12 +7,7 @@ const execProm = util.promisify(exec);
 
 let router = express.Router();
 router.get("/", async function (req, res) {
-  let title = "Nodejs-Template ";
-  let today = new moment().format("YYYY-MM-DD HH:mm:ss");
-  res.render("index", {
-    today,
-    title,
-  });
+  res.send("200");
 });
 
 const hostsMapping = config.hostsMapping;
