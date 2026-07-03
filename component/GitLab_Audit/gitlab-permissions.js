@@ -168,7 +168,55 @@ async function deleteSheetIfExists(sheetId, sheetName) {
       ],
     },
   });
-  console.log(`Sheet "${sheetName}" deleted.`);
+  console.log("Sheet \"" + sheetName + "\" deleted.");
+}
+
+async function assertSpreadsheetWritable(sheetId) {
+  const gsapi = await getGsAuth();
+  const sheetName = "__gitlab_audit_write_check_" + Date.now();
+  let tempSheetId;
+
+  try {
+    const response = await gsapi.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      resource: {
+        requests: [
+          {
+            addSheet: {
+              properties: { title: sheetName },
+            },
+          },
+        ],
+      },
+    });
+    tempSheetId = response.data.replies?.[0]?.addSheet?.properties?.sheetId;
+
+    await googleApis.updateGsSheet(sheetId, sheetName + "!A1", [["write_check"]]);
+    await googleApis.clearGsSheet(sheetId, sheetName + "!A1");
+    console.log("Verified write access to spreadsheet " + sheetId + ".");
+  } catch (error) {
+    throw new Error(
+      "Cannot write to config.sheetId.gitlab_test (" +
+        sheetId +
+        "). Share the spreadsheet with " +
+        config.google.client_email +
+        " as editor. " +
+        error.message
+    );
+  } finally {
+    if (tempSheetId) {
+      await gsapi.spreadsheets.batchUpdate({
+        spreadsheetId: sheetId,
+        resource: {
+          requests: [
+            {
+              deleteSheet: { sheetId: tempSheetId },
+            },
+          ],
+        },
+      });
+    }
+  }
 }
 
 async function getProjectsByGroupPaths(client, groupPaths) {
@@ -201,8 +249,10 @@ async function getProjectsByGroupPaths(client, groupPaths) {
 
 export async function updateGitlabPermissionsToSheet(groupPaths = DEFAULT_GROUP_PATHS) {
   const client = createGitlabClient();
-  const sheetId = config.sheetId.gitlab;
-  if (!sheetId) throw new Error("Missing config.sheetId.gitlab.");
+  const sheetId = config.sheetId.gitlab_test;
+  if (!sheetId) throw new Error("Missing config.sheetId.gitlab_test.");
+
+  await assertSpreadsheetWritable(sheetId);
 
   const projects = await getProjectsByGroupPaths(client, groupPaths);
 

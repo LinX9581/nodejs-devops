@@ -1,22 +1,27 @@
 import * as googleApis from "../../api/googleApis/gsCustom.js";
+import { getGsAuth } from "../../api/googleApis/googleApis.js";
 import { execFile } from "child_process";
 import util from "util";
 import config from "../../config.js";
 
 const execFileAsync = util.promisify(execFile);
-const HEADERS = ["NAME", "NETWORK", "DIRECTION", "PRIORITY", "ALLOW", "DISABLED", "TARGET_TAGS", "DENY", "用途", "IP範圍"];
+const NOTE_COLUMN_NAME = "用途";
+const HEADERS = ["NAME", "NETWORK", "DIRECTION", "PRIORITY", "ALLOW", "DISABLED", "TARGET_TAGS", "DENY", NOTE_COLUMN_NAME, "IP範圍"];
 
 export async function updateFirewallRulesToSheet(sheetId, projectList = config.stg_project) {
   try {
+    const existingNotesByProject = await getExistingNotesByProject(sheetId);
+
     for (const projectName of Object.keys(projectList)) {
       console.log("寫入的專案: " + projectName);
 
       const projectId = projectList[projectName];
       await googleApis.createGsSheet(sheetId, projectName);
+      const noteByFirewallKey = existingNotesByProject.get(projectName) || new Map();
       await googleApis.clearGsSheet(sheetId, `${projectName}!A1:Z`);
 
       const firewallRules = await getFirewallRules(projectId);
-      const rows = buildFirewallRows(firewallRules);
+      const rows = buildFirewallRows(firewallRules, noteByFirewallKey);
       await googleApis.updateGsSheet(sheetId, `${projectName}!A1`, rows);
 
       console.log(`Updated ${projectName}: ${rows.length - 1} firewall rules`);
@@ -45,7 +50,51 @@ async function getFirewallRules(projectId) {
   return JSON.parse(stdout || "[]");
 }
 
-function buildFirewallRows(firewallRules) {
+async function getExistingNotesByProject(sheetId) {
+  const gsapi = await getGsAuth();
+  const spreadsheet = await gsapi.spreadsheets.get({
+    spreadsheetId: sheetId,
+    fields: "sheets.properties.title",
+  });
+  const sheetNames = spreadsheet.data.sheets.map((sheet) => sheet.properties.title);
+  if (sheetNames.length === 0) return new Map();
+
+  const response = await gsapi.spreadsheets.values.batchGet({
+    spreadsheetId: sheetId,
+    ranges: sheetNames.map((sheetName) => `${sheetName}!A1:Z`),
+  });
+
+  const notesByProject = new Map();
+  for (const valueRange of response.data.valueRanges || []) {
+    const projectName = valueRange.range.split("!")[0].replace(/^'|'$/g, "");
+    const noteByFirewallKey = buildNoteMap(valueRange.values || []);
+    if (noteByFirewallKey.size > 0) notesByProject.set(projectName, noteByFirewallKey);
+  }
+
+  console.log(`Loaded firewall usage notes from ${notesByProject.size} sheets`);
+  return notesByProject;
+}
+
+function buildNoteMap(rows) {
+  if (rows.length === 0) return new Map();
+
+  const headers = rows[0];
+  const nameIndex = headers.indexOf("NAME");
+  const noteIndex = headers.indexOf(NOTE_COLUMN_NAME);
+  if (nameIndex === -1 || noteIndex === -1) return new Map();
+
+  const noteByFirewallKey = new Map();
+  for (const row of rows.slice(1)) {
+    const name = row[nameIndex];
+    const note = row[noteIndex];
+    if (!name || !note) continue;
+    noteByFirewallKey.set(getFirewallKey(name), note);
+  }
+
+  return noteByFirewallKey;
+}
+
+function buildFirewallRows(firewallRules, noteByFirewallKey = new Map()) {
   const rows = [HEADERS];
 
   firewallRules.sort(compareFirewallRules).forEach((rule) => {
@@ -58,12 +107,16 @@ function buildFirewallRows(firewallRules) {
       rule.disabled ?? "",
       formatList(rule.targetTags),
       formatFirewallEntries(rule.denied),
-      "",
+      noteByFirewallKey.get(getFirewallKey(rule.name)) || "",
       formatIpRanges(rule),
     ]);
   });
 
   return rows;
+}
+
+function getFirewallKey(name) {
+  return name || "";
 }
 
 function compareFirewallRules(a, b) {
