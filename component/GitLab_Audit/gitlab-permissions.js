@@ -196,7 +196,7 @@ async function assertSpreadsheetWritable(sheetId) {
     console.log("Verified write access to spreadsheet " + sheetId + ".");
   } catch (error) {
     throw new Error(
-      "Cannot write to config.sheetId.gitlab_test (" +
+      "Cannot write to config.sheetId.gitlab (" +
         sheetId +
         "). Share the spreadsheet with " +
         config.google.client_email +
@@ -249,8 +249,8 @@ async function getProjectsByGroupPaths(client, groupPaths) {
 
 export async function updateGitlabPermissionsToSheet(groupPaths = DEFAULT_GROUP_PATHS) {
   const client = createGitlabClient();
-  const sheetId = config.sheetId.gitlab_test;
-  if (!sheetId) throw new Error("Missing config.sheetId.gitlab_test.");
+  const sheetId = config.sheetId.gitlab;
+  if (!sheetId) throw new Error("Missing config.sheetId.gitlab.");
 
   await assertSpreadsheetWritable(sheetId);
 
